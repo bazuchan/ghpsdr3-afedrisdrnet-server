@@ -107,9 +107,9 @@ class AfedriSDR(object):
 		return self.hid_read()
 
 	def hid_get_eeprom_data(self, addr):
-		cmd = struct.pack('<BBB', HID_MEMORY_READ_WRITE_REPORT, HID_READ_EEPROM_COMMAND, addr)
+		cmd = struct.pack('<BBB', HID_GENERIC_REPORT, HID_READ_EEPROM_COMMAND, addr)
 		self.hid_write(cmd)
-		return struct.unpack('<H', self.hid_read()[2:4])
+		return struct.unpack('<H', self.hid_read()[2:4])[0]
 
 	def tcp_command(self, m_type, code, data):
 		sz = 5+len(data)
@@ -175,7 +175,7 @@ class AfedriSDR(object):
 			self.hid_generic_command(HID_GENERIC_DAC_COMMAND, int(gain))
 	
 	def get_main_clock(self):
-		return self.hid_get_eeprom_data(VADDRESS_MAIN_CLOCK_FREQ_LOW_HALFWORD) + self.hid_get_eeprom_data(VADDRESS_MAIN_CLOCK_FREQ_HIGH_HALFWORD)<<16
+		return self.hid_get_eeprom_data(VADDRESS_MAIN_CLOCK_FREQ_LOW_HALFWORD) | (self.hid_get_eeprom_data(VADDRESS_MAIN_CLOCK_FREQ_HIGH_HALFWORD)<<16)
 
 
 a = AfedriSDR(addr=('172.17.2.98', 50000))
@@ -188,5 +188,5 @@ a.set_network_sample_rate(250000)
 #print a.get_sample_rate()
 a.set_fe_gain(0)
 a.set_rf_gain(0)
-print a.get_main_clock()
+print a.calc_sample_rate(250000)
 
