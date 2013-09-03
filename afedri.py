@@ -29,6 +29,11 @@ HID_GENERIC_GET_SR_COMMAND = 14
 HID_GENERIC_SET_SAMPLE_RATE_COMMAND = 30
 HID_GENERIC_GAIN_COMMAND = 2
 HID_GENERIC_DAC_COMMAND = 8
+HID_GENERIC_GET_DST_IP_ADDRESS = 19
+HID_GENERIC_GET_DST_PORT = 20
+HID_GENERIC_SAVE_DST_IP_ADDRESS = 24
+HID_GENERIC_SAVE_DST_PORT = 25
+HID_GENERIC_START_UDP_STREAM_COMMAND = 26
 
 HID_READ_EEPROM_COMMAND = 0x55
 HID_WRITE_EEPROM_COMMAND = 0x56
@@ -36,6 +41,8 @@ HID_WRITE_EEPROM_COMMAND = 0x56
 CI_FREQUENCY = 0x0020
 CI_DDC_SAMPLE_RATE = 0x00B8
 CI_RF_GAIN = 0x0038
+CI_RECEIVER_STATE = 0x0018
+CI_UDP_IP_PORT = 0x00C5
 
 VADDRESS_MAIN_CLOCK_FREQ_LOW_HALFWORD = 0x0000
 VADDRESS_MAIN_CLOCK_FREQ_HIGH_HALFWORD = 0x0001
@@ -151,7 +158,7 @@ class AfedriSDR(object):
 
 	def get_sample_rate(self):
 		r = self.hid_generic_command(HID_GENERIC_GET_SR_COMMAND)
-		return struct.unpack('<I', r[2:6])[0]&0xFFFFF
+		return struct.unpack('<I', r[2:6])[0]&0xFFFFFF
 
 	def set_sample_rate(self, rate):
 		self.hid_set_eeprom_data(VADDRESS_SAMPLE_RATE_LO, rate&0xFFFF)
@@ -160,9 +167,9 @@ class AfedriSDR(object):
 	def set_network_sample_rate(self, rate):
 		if self.network:
 			cmd = struct.pack('<BI', 0, int(rate))
-			return self.tcp_command(REQ_ITEM_SET, CI_DDC_SAMPLE_RATE, cmd)
+			self.tcp_command(REQ_ITEM_SET, CI_DDC_SAMPLE_RATE, cmd)
 		else:
-			return self.hid_generic_command(HID_GENERIC_SET_SAMPLE_RATE_COMMAND, rate, 'I')
+			self.hid_generic_command(HID_GENERIC_SET_SAMPLE_RATE_COMMAND, rate, 'I')
 
 	def set_fe_gain(self, gainindex):
 		self.hid_generic_command(HID_GENERIC_GAIN_COMMAND, int(gainindex)+1)
@@ -177,6 +184,30 @@ class AfedriSDR(object):
 	def get_main_clock(self):
 		return self.hid_get_eeprom_data(VADDRESS_MAIN_CLOCK_FREQ_LOW_HALFWORD) | (self.hid_get_eeprom_data(VADDRESS_MAIN_CLOCK_FREQ_HIGH_HALFWORD)<<16)
 
+	def get_dst_ip(self):
+		r = self.hid_generic_command(HID_GENERIC_GET_DST_IP_ADDRESS)
+		return '.'.join([`ord(i)` for i in r[5:1:-1]])
+
+	def get_dst_port(self):
+		r = self.hid_generic_command(HID_GENERIC_GET_DST_PORT)
+		return struct.unpack('<I', r[2:6])[0]&0xFFFF
+
+	def set_dst_ip_port(self, ip, port):
+		n_ip = struct.unpack('<I', ''.join([chr(int(i)) for i in reversed(ip.split('.'))]))[0]
+		if self.network:
+			cmd = struct.pack('<IH', n_ip, port)
+			self.tcp_command(REQ_ITEM_SET, CI_UDP_IP_PORT, cmd)
+		else:
+			self.hid_generic_command(HID_GENERIC_SAVE_DST_IP_ADDRESS, n_ip, 'I')
+			self.hid_generic_command(HID_GENERIC_SAVE_DST_PORT, port, 'I')
+
+	def stream(self, state):
+		if self.network:
+			cmd = struct.pack('<BBB', 0x80, int(bool(state))+1, 0)
+			self.tcp_command(REQ_ITEM_SET, CI_RECEIVER_STATE, cmd)
+		else:
+			self.hid_generic_command(HID_GENERIC_START_UDP_STREAM_COMMAND, int(bool(state)))
+
 
 a = AfedriSDR(addr=('172.17.2.98', 50000))
 #a.init_fe()
@@ -189,4 +220,8 @@ a.set_network_sample_rate(250000)
 a.set_fe_gain(0)
 a.set_rf_gain(0)
 print a.calc_sample_rate(250000)
+a.set_dst_ip_port('172.17.2.212', 40000)
+print a.get_dst_ip()
+print a.get_dst_port()
+a.stream(False)
 
