@@ -64,8 +64,9 @@ def _rf_gain2db(gain):
 	return float(gain)/5.1-9.8
 
 class AfedriSDR(object):
-	def __init__(self, addr=('192.168.1.8',50000), network=True):
+	def __init__(self, addr=('192.168.1.8',50000), network=True, need_init=False, swapiq=None, samp_rate=250000, rf_gain=48, fe_gain=0, init_freq=7000000):
 		self.network = network
+		self.swapiq = swapiq
 		self.cmdsize = HID_COMMAND_SIZE
 		if self.network:
 			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
@@ -78,6 +79,16 @@ class AfedriSDR(object):
 		if r:
 			raise IOError, 'Init error %u' % (r)
 		self.clock = self.get_main_clock()
+		if need_init:
+			a.init_fe()
+			if self.network:
+				a.set_network_sample_rate(samp_rate)
+			else:
+				a.set_sample_rate(samp_rate)
+			a.set_rf_gain(rf_gain)
+			a.set_fe_gain(fe_gain)
+			a.set_freq(init_freq)
+			a.stream(False)
 
 	def pad(self, s):
 		return s[:self.cmdsize]+'\0'*(self.cmdsize-len(s[:self.cmdsize]))
@@ -209,19 +220,10 @@ class AfedriSDR(object):
 			self.hid_generic_command(HID_GENERIC_START_UDP_STREAM_COMMAND, int(bool(state)))
 
 
-a = AfedriSDR(addr=('172.17.2.98', 50000))
-#a.init_fe()
-print a.get_fw_version()
-a.set_freq(7300000)
-print a.get_freq()
-a.set_network_sample_rate(250000)
-#a.set_sample_rate(200000)
-#print a.get_sample_rate()
-a.set_fe_gain(0)
-a.set_rf_gain(0)
-print a.calc_sample_rate(250000)
-a.set_dst_ip_port('172.17.2.212', 40000)
-print a.get_dst_ip()
-print a.get_dst_port()
-a.stream(False)
+	def setup_recv(self):
+		port = self.get_dst_port()
+		socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+		socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8*1024**2)
+		socket.bind(('0.0.0.0', port))
+		return socket
 
