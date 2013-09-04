@@ -16,14 +16,13 @@ CMDLEN = 1024 # should always fit
 BUFFER_SIZE = 1024 # from dspserver
 PERIOD = 1028 # packet length
 TXLEN = 500 # from dspserver
-PTXLEN = 1024 # for predsp
+SAMP_RATE = 250000
 
 class SharedData(object):
-	def __init__(self, predsp=False):
+	def __init__(self):
 		self.mutex = threading.Lock()
 		self.clients = {}
 		self.receivers = {}
-		self.predsp = predsp
 		self.exit = False
 
 	def acquire(self):
@@ -78,8 +77,10 @@ class ListenerHandler(SocketServer.BaseRequestHandler):
 					self.request.sendall('Error: Receiver in use')
 					continue
 				shared.clients[caddr].receiver = int(m.group(1))
+				idx = shared.clients[caddr].receiver
+				afedri = shared.receivers[idx]
 				shared.release()
-				self.request.sendall('OK 192000')
+				self.request.sendall('OK %f' % (afedri.get_network_sample_rate()))
 				continue
 			m = re.search('^detach (\d+)', data, re.M)
 			if m:
@@ -95,7 +96,7 @@ class ListenerHandler(SocketServer.BaseRequestHandler):
 				shared.clients[caddr].receiver = -1
 				shared.clients[caddr].port = -1
 				shared.release()
-				self.request.sendall('OK 192000')
+				self.request.sendall('OK')
 				continue
 			m = re.search('^frequency ([0-9.,e+-]+)', data, re.M)
 			if m:
@@ -176,57 +177,58 @@ def afedrisdrnet_io(shared, afedri, idx):
 		shared.release()
 		raise IOError, 'Receiver with inde %d already connected' % (idx)
 	shared.receivers[idx] = afedri
-	predsp = shared.predsp
 	shared.release()
 	pcm = afedri.setup_recv()
 	afedri.stream(True)
 	seq = 0L
+	aseq = 0L
+	buff = ''
 	while 1:
+		if shared.exit:
+			afedri.stream(False)
+			return
 		audio = pcm.recv(PERIOD)
 		(b, n) = struct.unpack('<HH', audio[:4])
 		if b!=0x8404:
 			continue
-		if seq==0:
-			seq = n
-		if n>(seq&0xFFFF):
-			seq = (seq&(~0xFFFF))|n
-		audio = audio[4:]
+		if aseq==0:
+			aseq = n
+		elif n>aseq&0xFFFF:
+			buff += '\0'*(n-(aseq&0xFFFF))*(PERIOD-4)
+			aseq += n-(aseq&0xFFFF)
+			print 'overrun'
+		buff += audio[4:]
+		aseq += 1
+		if len(buff)>=BUFFER_SIZE*4:
+				tmp = buff[:BUFFER_SIZE*4]
+				buff = buff[BUFFER_SIZE*4:]
+		else:
+			continue
+		naudio = numpy.fromstring(tmp, dtype="<h")/numpy.float32(32767.0)
+		if afedri.swapiq:
+			txdata = naudio[1::2].tostring() + naudio[::2].tostring()
+		else:
+			txdata = naudio[::2].tostring() + naudio[1::2].tostring()
 		rcv = []
 		shared.acquire()
 		for caddr in shared.clients.keys():
 			if shared.clients[caddr].receiver==idx and shared.clients[caddr].port!=-1:
 				rcv.append((shared.clients[caddr].socket, (caddr[0], shared.clients[caddr].port)))
 		shared.release()
-		if shared.exit:
-			afedri.stream(False)
-			return
-		if predsp:
-			for j in xrange(0, (len(audio)+PTXLEN-1)/(PTXLEN)):
-				for k in rcv:
-					snd = struct.pack('<I', seq&0xFFFFFFFF)
-					k[0].sendto(snd+audio[j*PTXLEN:j*PTXLEN+min(len(audio)-j*PTXLEN, PTXLEN)], (k[1][0], k[1][1]+500))
-		else:
-			naudio = numpy.fromstring(audio, dtype="<h")/numpy.float32(32767.0)
-			naudio.resize(len(naudio)/(BUFFER_SIZE*2), BUFFER_SIZE*2)
-			for i in naudio:
-				if afedri.swapiq:
-					txdata = i[::2].tostring() + i[1::2].tostring()
-				else:
-					txdata = i[1::2].tostring() + i[::2].tostring()
-				for j in xrange(0, (len(txdata)+TXLEN-1)/(TXLEN)):
-					for k in rcv:
-						snd = struct.pack('<IIHH', seq&0xFFFFFFFF, (seq>>32)&0xFFFFFFFF, j*TXLEN, min(len(txdata)-j*TXLEN, TXLEN))
-						k[0].sendto(snd+txdata[j*TXLEN:j*TXLEN+min(len(txdata)-j*TXLEN, TXLEN)], k[1])
-				seq += 1
+		for j in xrange(0, (len(txdata)+TXLEN-1)/(TXLEN)):
+			for k in rcv:
+				snd = struct.pack('<IIHH', seq&0xFFFFFFFF, (seq>>32)&0xFFFFFFFF, j*TXLEN, min(len(txdata)-j*TXLEN, TXLEN))
+				k[0].sendto(snd+txdata[j*TXLEN:j*TXLEN+min(len(txdata)-j*TXLEN, TXLEN)], k[1])
+		seq += 1
 
 def create_afedrisdrnet_thread(clients, afedri, idx=0):
 	t = threading.Thread(target=afedrisdrnet_io, args=(clients, afedri, idx))
 	t.start()
 	return t
 
-shared = SharedData(predsp='-p' in sys.argv)
+shared = SharedData()
 try:
-	afedri = AfedriSDR(swapiq='-s' in sys.argv, need_init=True)
+	afedri = AfedriSDR(addr=(sys.argv[-1], 50000), swapiq='-s' in sys.argv, need_init=True, samp_rate=SAMP_RATE)
 except IOError:
 	sys.stderr.write('AfedriSDR not found\n')
 	sys.exit(0)

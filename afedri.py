@@ -68,6 +68,7 @@ class AfedriSDR(object):
 		self.network = network
 		self.swapiq = swapiq
 		self.cmdsize = HID_COMMAND_SIZE
+		self.net_samp_rate = samp_rate
 		if self.network:
 			self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP)
 			self.sock.connect(addr)
@@ -78,17 +79,17 @@ class AfedriSDR(object):
 		r = self.get_init_status()
 		if r:
 			raise IOError, 'Init error %u' % (r)
-		self.clock = self.get_main_clock()
 		if need_init:
-			a.init_fe()
-			if self.network:
-				a.set_network_sample_rate(samp_rate)
-			else:
-				a.set_sample_rate(samp_rate)
-			a.set_rf_gain(rf_gain)
-			a.set_fe_gain(fe_gain)
-			a.set_freq(init_freq)
-			a.stream(False)
+			self.init_fe()
+		self.clock = self.get_main_clock()
+		if self.network:
+			self.set_network_sample_rate(samp_rate)
+		else:
+			self.set_sample_rate(samp_rate)
+		self.set_rf_gain(rf_gain)
+		self.set_fe_gain(fe_gain)
+		self.set_freq(init_freq)
+		self.stream(False)
 
 	def pad(self, s):
 		return s[:self.cmdsize]+'\0'*(self.cmdsize-len(s[:self.cmdsize]))
@@ -181,6 +182,10 @@ class AfedriSDR(object):
 			self.tcp_command(REQ_ITEM_SET, CI_DDC_SAMPLE_RATE, cmd)
 		else:
 			self.hid_generic_command(HID_GENERIC_SET_SAMPLE_RATE_COMMAND, rate, 'I')
+		self.net_samp_rate = self.calc_sample_rate(rate)
+
+	def get_network_sample_rate(self):
+		return self.net_samp_rate
 
 	def set_fe_gain(self, gainindex):
 		self.hid_generic_command(HID_GENERIC_GAIN_COMMAND, int(gainindex)+1)
@@ -222,8 +227,8 @@ class AfedriSDR(object):
 
 	def setup_recv(self):
 		port = self.get_dst_port()
-		socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-		socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8*1024**2)
-		socket.bind(('0.0.0.0', port))
-		return socket
+		sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+		sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8*1024**2)
+		sock.bind(('0.0.0.0', port))
+		return sock
 
