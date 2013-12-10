@@ -34,6 +34,7 @@ HID_GENERIC_GET_DST_PORT = 20
 HID_GENERIC_SAVE_DST_IP_ADDRESS = 24
 HID_GENERIC_SAVE_DST_PORT = 25
 HID_GENERIC_START_UDP_STREAM_COMMAND = 26
+HID_GENERIC_IAP_COMMAND = 38
 
 HID_READ_EEPROM_COMMAND = 0x55
 HID_WRITE_EEPROM_COMMAND = 0x56
@@ -147,6 +148,9 @@ class AfedriSDR(object):
 	def get_fw_version(self):
 		r = self.hid_generic_command(HID_GENERIC_VER_COMMAND)
 		return '%X' % struct.unpack('<I', r[2:6])
+
+	def start_fw_upgrade(self):
+		self.hid_generic_command(HID_GENERIC_IAP_COMMAND)
 
 	def init_fe(self):
 		self.hid_generic_command(HID_GENERIC_INIT_FE_COMMAND, ~HID_GENERIC_INIT_FE_COMMAND&0xFF)
